@@ -64,14 +64,14 @@ export type RangeNeedle = GeneratedRange;
 export type OriginalPosition = { line: number; column: number };
 
 /**
- * One mapping found by `originalRangeFor`, in generated order.
+ * One mapping found by `originalMappingsFor`, in generated order.
  *
  * - `range`: a range mapping intersected with the needle. Every generated
  *   position in `generated` projects linearly onto `[start, end)` in the source.
  * - `point`: a normal mapping, at the generated position where it starts (or
  *   at the needle's start, for a mapping that started before the needle).
  */
-export type OriginalRangePiece =
+export type OriginalMappingPiece =
   | {
       type: 'range';
       generated: GeneratedRange;

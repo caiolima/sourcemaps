@@ -42,7 +42,7 @@ import type {
   Needle,
   SourceNeedle,
   RangeNeedle,
-  OriginalRangePiece,
+  OriginalMappingPiece,
   SourceMap,
   EachMapping,
   Bias,
@@ -72,7 +72,7 @@ export type {
   Needle,
   RangeNeedle,
   OriginalPosition,
-  OriginalRangePiece,
+  OriginalMappingPiece,
   OriginalMapping,
   OriginalMapping as Mapping,
   SectionedSourceMapInput,
@@ -367,11 +367,12 @@ type Position = [line: number, column: number];
 /**
  * Like `originalPositionFor`, but for a generated range `[start, end)`. Returns
  * the mappings that cover the range, in generated order: each normal mapping as
- * a point, and each range mapping intersected with the range. The mapping
- * covering `start` is found with GREATEST_LOWER_BOUND, like `traceSegment`, so
- * it may have started before the range. Unmapped stretches aren't reported.
+ * a point, and each range mapping intersected with the range. A mapping that
+ * started before `start` but still covers it (GREATEST_LOWER_BOUND, like
+ * `traceSegment`) is reported at `start`: as a point there, or as a range cut
+ * at `start`. Unmapped stretches aren't reported.
  */
-export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRangePiece[] {
+export function originalMappingsFor(map: TraceMap, needle: RangeNeedle): OriginalMappingPiece[] {
   const { start, end } = needle;
   if (start.line <= 0 || end.line <= 0) throw new Error(LINE_GTR_ZERO);
   if (start.column < 0 || end.column < 0) throw new Error(COL_GTR_EQ_ZERO);
@@ -422,7 +423,7 @@ export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRa
   }
 
   const { names, resolvedSources } = map;
-  const result: OriginalRangePiece[] = [];
+  const result: OriginalMappingPiece[] = [];
   for (const { segment, start, end } of pieces) {
     if (segment == null || segment.length === 1) continue;
 

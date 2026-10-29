@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import {
   TraceMap,
   originalPositionFor,
-  originalRangeFor,
+  originalMappingsFor,
   type DecodedSourceMap,
   type SourceMapSegment,
 } from '../src/trace-mapping';
 
 type Pos = { line: number; column: number };
 type Needle = { start: Pos; end: Pos };
-type Piece = ReturnType<typeof originalRangeFor>[number];
+type Piece = ReturnType<typeof originalMappingsFor>[number];
 
 // Scenario letters from range_mappings_composition.md, as concrete columns.
 const D = 100;
@@ -31,10 +31,7 @@ function map(segments: SourceMapSegment[][], ranges: number[][]): TraceMap {
 }
 
 const pos = (line: number, column: number): Pos => ({ line, column });
-const gen = (sc: number, ec: number, sl = 1, el = sl): Needle => ({
-  start: pos(sl, sc),
-  end: pos(el, ec),
-});
+const span = (start: Pos, end: Pos): Needle => ({ start, end });
 
 /**
  * Moves `p` from the space that starts at `from` into the space that starts at
@@ -56,12 +53,12 @@ function startOf(piece: Piece): Pos {
 
 /**
  * Traces a needle through several maps (outermost first) using only
- * originalRangeFor, rebasing each child piece onto the outermost generated
+ * originalMappingsFor, rebasing each child piece onto the outermost generated
  * space.
  */
 function chain(layers: TraceMap[], needle: Needle): Piece[] {
   const [layer, ...rest] = layers;
-  const pieces = originalRangeFor(layer, needle);
+  const pieces = originalMappingsFor(layer, needle);
   if (rest.length === 0) return pieces;
   return pieces.flatMap((p): Piece[] => {
     if (p.type === 'point') {
@@ -152,11 +149,11 @@ function summary(pieces: Piece[]) {
   );
 }
 
-describe('originalRangeFor', () => {
+describe('originalMappingsFor', () => {
   describe('composition scenarios (single line)', () => {
     it('scenario 2: zero-width needle inside a child range resolves to a point', () => {
       const child = map([[[D, 0, 0, E], [D + 8]]], [[0]]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(D + 4, D + 4))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D + 4), pos(1, D + 4)))), [
         ['point', `1:${D + 4}`, `1:${E + 4}`],
       ]);
     });
@@ -172,7 +169,7 @@ describe('originalRangeFor', () => {
         ],
         [[]],
       );
-      assert.deepEqual(summary(originalRangeFor(child, gen(D, D + 5))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D), pos(1, D + 5)))), [
         ['point', `1:${D + 2}`, `1:${E}`],
         ['point', `1:${D + 3}`, `1:${F}`],
         ['point', `1:${D + 4}`, `1:${G}`],
@@ -181,17 +178,17 @@ describe('originalRangeFor', () => {
 
     it('scenario 4A: a child range is intersected (truncated) with the needle', () => {
       const child = map([[[D + 6, 0, 0, G], [D + 9]]], [[0]]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(D, D + 8))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D), pos(1, D + 8)))), [
         ['range', `1:${D + 6}-1:${D + 8}`, `1:${G}-1:${G + 2}`],
       ]);
     });
 
     it('scenario 4B: a needle inside a larger child range keeps its width', () => {
       const child = map([[[D, 0, 0, F], [D + 20]]], [[0]]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(D + 2, D + 4))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D + 2), pos(1, D + 4)))), [
         ['range', `1:${D + 2}-1:${D + 4}`, `1:${F + 2}-1:${F + 4}`],
       ]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(D + 13, D + 16))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D + 13), pos(1, D + 16)))), [
         ['range', `1:${D + 13}-1:${D + 16}`, `1:${F + 13}-1:${F + 16}`],
       ]);
     });
@@ -206,7 +203,7 @@ describe('originalRangeFor', () => {
         ],
         [[]],
       );
-      assert.deepEqual(summary(originalRangeFor(child, gen(D, D + 4))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, D), pos(1, D + 4)))), [
         ['point', `1:${D}`, `1:${E}`],
         ['point', `1:${D + 2}`, `1:${F}`],
       ]);
@@ -224,7 +221,7 @@ describe('originalRangeFor', () => {
         ],
         [[]],
       );
-      assert.deepEqual(summary(chain([middle, bottom], gen(D, D + 8))), [
+      assert.deepEqual(summary(chain([middle, bottom], span(pos(1, D), pos(1, D + 8)))), [
         ['point', `1:${D + 2}`, `1:${J}`], // doc: C+2 -> J
         ['point', `1:${D + 3}`, `1:${K}`], // doc: C+3 -> K
       ]);
@@ -235,18 +232,18 @@ describe('originalRangeFor', () => {
     it('scenario 4A: a range continuing over lines is truncated by the needle', () => {
       // RANGE from 2:5 -> 8:20 that runs until the sourceless segment at 4:3.
       const child = map([[], [[5, 0, 7, 20]], [], [[3]]], [[], [0], [], []]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(10, 8, 1, 3))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, 10), pos(3, 8)))), [
         // The first line shifts columns; the next lines keep them as-is.
         ['range', '2:5-3:8', '8:20-9:8'],
       ]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(7, 9, 2, 6))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(2, 7), pos(6, 9)))), [
         ['range', '2:7-4:3', '8:22-10:3'],
       ]);
     });
 
     it('reports points and ranges, but not the unmapped stretches between them', () => {
       const child = map([[[2, 0, 0, 0]], [], [[4, 0, 5, 0]], [], [[1]]], [[], [], [0], [], []]);
-      assert.deepEqual(summary(originalRangeFor(child, gen(0, 2, 1, 5))), [
+      assert.deepEqual(summary(originalMappingsFor(child, span(pos(1, 0), pos(5, 2)))), [
         ['point', '1:2', '1:0'],
         ['range', '3:4-5:1', '6:0-8:1'],
       ]);
@@ -262,7 +259,7 @@ describe('originalRangeFor', () => {
       const bottomRanges = bottomLines.map((_, i) => (i === 12 ? [0] : []));
       const bottom = map(bottomLines, bottomRanges);
 
-      assert.deepEqual(summary(chain([middle, bottom], gen(0, 10, 1, 3))), [
+      assert.deepEqual(summary(chain([middle, bottom], span(pos(1, 0), pos(3, 10)))), [
         ['point', '2:2', `1:${J}`],
         ['range', '3:0-3:6', '30:50-30:56'],
       ]);
@@ -292,8 +289,8 @@ describe('originalRangeFor', () => {
         rangeMappings: [[0], [], [0], [], [], [0]],
       } satisfies DecodedSourceMap);
 
-      const needle = gen(3, 12, 1, 7);
-      const pieces = originalRangeFor(tracer, needle);
+      const needle = span(pos(1, 3), pos(7, 12));
+      const pieces = originalMappingsFor(tracer, needle);
       assert.deepEqual(summary(pieces), [
         ['range', '1:3-1:20', '1:3-1:20'],
         ['point', '1:20', '1:20'],
