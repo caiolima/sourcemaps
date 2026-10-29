@@ -55,6 +55,43 @@ export type InvalidGeneratedMapping = {
   column: null;
 };
 
+/**
+ * A generated range. Lines are 1-based, columns 0-based, and `end` is exclusive.
+ */
+export type GeneratedRange = { start: GeneratedMapping; end: GeneratedMapping };
+export type RangeNeedle = GeneratedRange;
+
+export type OriginalPosition = { line: number; column: number };
+
+/**
+ * One piece of the result of `originalRangeFor`. The pieces tile the needle's
+ * generated range in order, without gaps or overlaps.
+ *
+ * - `range`: the piece is covered by a range mapping, so every generated
+ *   position inside it projects linearly onto `[start, end)` in the source.
+ * - `point`: the piece is covered by a normal mapping, so every generated
+ *   position inside it resolves to the same original position.
+ * - `unmapped`: no mapping (or a sourceless segment) covers the piece.
+ */
+export type OriginalRangePiece =
+  | {
+      type: 'range';
+      generated: GeneratedRange;
+      source: string | null;
+      start: OriginalPosition;
+      end: OriginalPosition;
+      name: string | null;
+    }
+  | {
+      type: 'point';
+      generated: GeneratedRange;
+      source: string | null;
+      line: number;
+      column: number;
+      name: string | null;
+    }
+  | { type: 'unmapped'; generated: GeneratedRange };
+
 export type Bias = typeof GREATEST_LOWER_BOUND | typeof LEAST_UPPER_BOUND;
 
 export type XInput = { x_google_ignoreList?: SourceMapV3['ignoreList'] };

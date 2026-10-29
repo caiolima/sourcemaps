@@ -41,6 +41,9 @@ import type {
   SourceMapInput,
   Needle,
   SourceNeedle,
+  RangeNeedle,
+  OriginalRangePiece,
+  GeneratedRange,
   SourceMap,
   EachMapping,
   Bias,
@@ -64,9 +67,13 @@ export type {
   Bias,
   EachMapping,
   GeneratedMapping,
+  GeneratedRange,
   InvalidGeneratedMapping,
   InvalidOriginalMapping,
   Needle,
+  RangeNeedle,
+  OriginalPosition,
+  OriginalRangePiece,
   OriginalMapping,
   OriginalMapping as Mapping,
   SectionedSourceMapInput,
@@ -351,6 +358,116 @@ export function originalPositionFor(
     segment[SOURCE_COLUMN],
     segment.length === 5 ? names[segment[NAMES_INDEX]] : null,
   );
+}
+
+/**
+ * Like `originalPositionFor`, but for a generated range `[start, end)`. Returns
+ * the pieces that tile the range, each covered by a single mapping. A point
+ * mapping that starts inside the range splits it, and a range mapping is
+ * intersected with it. Every position inside a piece resolves exactly as
+ * `originalPositionFor` (with GREATEST_LOWER_BOUND) would resolve it.
+ */
+export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRangePiece[] {
+  const { start, end } = needle;
+  if (start.line <= 0 || end.line <= 0) throw new Error(LINE_GTR_ZERO);
+  if (start.column < 0 || end.column < 0) throw new Error(COL_GTR_EQ_ZERO);
+  const sLine = start.line - 1;
+  const sCol = start.column;
+  const eLine = end.line - 1;
+  const eCol = end.column;
+  if (eLine < sLine || (eLine === sLine && eCol < sCol)) {
+    throw new Error('`end` must not be before `start`');
+  }
+
+  const decoded = decodedMappings(map);
+  const rangeSegments = initRangeSegments(map, decoded);
+  const memo = cast(map)._decodedMemo;
+
+  // Every position where the covering mapping may change: the needle's start,
+  // each segment strictly inside the needle, and each line start (a normal
+  // mapping never continues onto the next line, but a range mapping does).
+  const bounds: number[][] = [[sLine, sCol]];
+  for (let line = sLine; line <= eLine; line++) {
+    if (line > sLine && (line < eLine || eCol > 0)) pushBound(bounds, line, 0);
+    const segments = line < decoded.length ? decoded[line] : [];
+    for (let i = 0; i < segments.length; i++) {
+      const col = segments[i][COLUMN];
+      if (line === sLine && col <= sCol) continue;
+      if (line === eLine && col >= eCol) break;
+      pushBound(bounds, line, col);
+    }
+  }
+
+  const pieces: { segment: SourceMapSegment | null; start: number[]; end: number[] }[] = [];
+  for (let i = 0; i < bounds.length; i++) {
+    const [line, col] = bounds[i];
+    let segment = traceSegmentInternal(
+      decoded,
+      rangeSegments,
+      memo,
+      line,
+      col,
+      GREATEST_LOWER_BOUND,
+    );
+    if (segment != null && segment.length === 1) segment = null;
+
+    const last = pieces[pieces.length - 1];
+    // A range mapping that continues past a line start stays one piece.
+    if (last && last.segment === segment) continue;
+    if (last) last.end = bounds[i];
+    pieces.push({ segment, start: bounds[i], end: [eLine, eCol] });
+  }
+
+  const { names, resolvedSources } = map;
+  return pieces.map(({ segment, start, end }): OriginalRangePiece => {
+    const generated: GeneratedRange = {
+      start: GMapping(start[0] + 1, start[1]),
+      end: GMapping(end[0] + 1, end[1]),
+    };
+    if (segment == null || segment.length === 1) return { type: 'unmapped', generated };
+
+    const source = resolvedSources[segment[SOURCES_INDEX]];
+    const name = segment.length === 5 ? names[segment[NAMES_INDEX]] : null;
+    const rangeLine = rangeSegments.get(segment);
+    if (rangeLine === undefined) {
+      return {
+        type: 'point',
+        generated,
+        source,
+        line: segment[SOURCE_LINE] + 1,
+        column: segment[SOURCE_COLUMN],
+        name,
+      };
+    }
+
+    const s = rangeOffset(segment, rangeLine, start[0], start[1])!;
+    const e = rangeOffset(segment, rangeLine, end[0], end[1])!;
+    // A zero-width needle inside a range mapping resolves to a single point.
+    if (start[0] === end[0] && start[1] === end[1]) {
+      return {
+        type: 'point',
+        generated,
+        source,
+        line: s[SOURCE_LINE] + 1,
+        column: s[SOURCE_COLUMN],
+        name,
+      };
+    }
+    return {
+      type: 'range',
+      generated,
+      source,
+      start: { line: s[SOURCE_LINE] + 1, column: s[SOURCE_COLUMN] },
+      end: { line: e[SOURCE_LINE] + 1, column: e[SOURCE_COLUMN] },
+      name,
+    };
+  });
+}
+
+function pushBound(bounds: number[][], line: number, column: number) {
+  const last = bounds[bounds.length - 1];
+  if (last[0] === line && last[1] === column) return;
+  bounds.push([line, column]);
 }
 
 /**
@@ -783,7 +900,9 @@ function rangeOffset<T extends SourceMapSegment | ReverseSegment>(
   if (range.length === 1) return [column] as T;
 
   const lineDelta = line - rangeLine;
-  const columnDelta = lineDelta === 0 ? column - range[COLUMN] : column;
+  // On the range's first line, columns shift by the same amount. After a
+  // newline, both sides restart at column 0, so the column is kept as-is.
+  const sourceColumn = lineDelta === 0 ? range[SOURCE_COLUMN] + column - range[COLUMN] : column;
   if (range.length === 6) {
     if (line > range[REV_RANGE_END_LINE]) return null;
     if (line === range[REV_RANGE_END_LINE] && column >= range[REV_RANGE_END_COLUMN]) return null;
@@ -793,14 +912,9 @@ function rangeOffset<T extends SourceMapSegment | ReverseSegment>(
       column,
       range[SOURCES_INDEX],
       range[SOURCE_LINE] + lineDelta,
-      range[SOURCE_COLUMN] + columnDelta,
+      sourceColumn,
       range[NAMES_INDEX],
     ] as T;
   }
-  return [
-    column,
-    range[SOURCES_INDEX],
-    range[SOURCE_LINE] + lineDelta,
-    range[SOURCE_COLUMN] + columnDelta,
-  ] as T;
+  return [column, range[SOURCES_INDEX], range[SOURCE_LINE] + lineDelta, sourceColumn] as T;
 }
