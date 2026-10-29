@@ -64,14 +64,12 @@ export type RangeNeedle = GeneratedRange;
 export type OriginalPosition = { line: number; column: number };
 
 /**
- * One piece of the result of `originalRangeFor`. The pieces tile the needle's
- * generated range in order, without gaps or overlaps.
+ * One mapping found by `originalRangeFor`, in generated order.
  *
- * - `range`: the piece is covered by a range mapping, so every generated
- *   position inside it projects linearly onto `[start, end)` in the source.
- * - `point`: the piece is covered by a normal mapping, so every generated
- *   position inside it resolves to the same original position.
- * - `unmapped`: no mapping (or a sourceless segment) covers the piece.
+ * - `range`: a range mapping intersected with the needle. Every generated
+ *   position in `generated` projects linearly onto `[start, end)` in the source.
+ * - `point`: a normal mapping, at the generated position where it starts (or
+ *   at the needle's start, for a mapping that started before the needle).
  */
 export type OriginalRangePiece =
   | {
@@ -84,13 +82,12 @@ export type OriginalRangePiece =
     }
   | {
       type: 'point';
-      generated: GeneratedRange;
+      generated: GeneratedMapping;
       source: string | null;
       line: number;
       column: number;
       name: string | null;
-    }
-  | { type: 'unmapped'; generated: GeneratedRange };
+    };
 
 export type Bias = typeof GREATEST_LOWER_BOUND | typeof LEAST_UPPER_BOUND;
 

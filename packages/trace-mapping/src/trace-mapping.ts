@@ -43,7 +43,6 @@ import type {
   SourceNeedle,
   RangeNeedle,
   OriginalRangePiece,
-  GeneratedRange,
   SourceMap,
   EachMapping,
   Bias,
@@ -361,11 +360,16 @@ export function originalPositionFor(
 }
 
 /**
+ * A 0-based generated line/column.
+ */
+type Position = [line: number, column: number];
+
+/**
  * Like `originalPositionFor`, but for a generated range `[start, end)`. Returns
- * the pieces that tile the range, each covered by a single mapping. A point
- * mapping that starts inside the range splits it, and a range mapping is
- * intersected with it. Every position inside a piece resolves exactly as
- * `originalPositionFor` (with GREATEST_LOWER_BOUND) would resolve it.
+ * the mappings that cover the range, in generated order: each normal mapping as
+ * a point, and each range mapping intersected with the range. The mapping
+ * covering `start` is found with GREATEST_LOWER_BOUND, like `traceSegment`, so
+ * it may have started before the range. Unmapped stretches aren't reported.
  */
 export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRangePiece[] {
   const { start, end } = needle;
@@ -383,13 +387,12 @@ export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRa
   const rangeSegments = initRangeSegments(map, decoded);
   const memo = cast(map)._decodedMemo;
 
-  // Every position where the covering mapping may change: the needle's start,
-  // each segment strictly inside the needle, and each line start (a normal
-  // mapping never continues onto the next line, but a range mapping does).
-  const bounds: number[][] = [[sLine, sCol]];
-  for (let line = sLine; line <= eLine; line++) {
-    if (line > sLine && (line < eLine || eCol > 0)) pushBound(bounds, line, 0);
-    const segments = line < decoded.length ? decoded[line] : [];
+  // Every position where a mapping may start: the needle's start, and each
+  // segment strictly inside the needle. A range mapping always ends at the next
+  // segment, so these are also the only places where one can end.
+  const bounds: Position[] = [[sLine, sCol]];
+  for (let line = sLine; line <= eLine && line < decoded.length; line++) {
+    const segments = decoded[line];
     for (let i = 0; i < segments.length; i++) {
       const col = segments[i][COLUMN];
       if (line === sLine && col <= sCol) continue;
@@ -398,7 +401,7 @@ export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRa
     }
   }
 
-  const pieces: { segment: SourceMapSegment | null; start: number[]; end: number[] }[] = [];
+  const pieces: { segment: SourceMapSegment | null; start: Position; end: Position }[] = [];
   for (let i = 0; i < bounds.length; i++) {
     const [line, col] = bounds[i];
     let segment = traceSegmentInternal(
@@ -412,59 +415,61 @@ export function originalRangeFor(map: TraceMap, needle: RangeNeedle): OriginalRa
     if (segment != null && segment.length === 1) segment = null;
 
     const last = pieces[pieces.length - 1];
-    // A range mapping that continues past a line start stays one piece.
     if (last && last.segment === segment) continue;
+    // The next bound ends the previous mapping, even an unmapped one.
     if (last) last.end = bounds[i];
     pieces.push({ segment, start: bounds[i], end: [eLine, eCol] });
   }
 
   const { names, resolvedSources } = map;
-  return pieces.map(({ segment, start, end }): OriginalRangePiece => {
-    const generated: GeneratedRange = {
-      start: GMapping(start[0] + 1, start[1]),
-      end: GMapping(end[0] + 1, end[1]),
-    };
-    if (segment == null || segment.length === 1) return { type: 'unmapped', generated };
+  const result: OriginalRangePiece[] = [];
+  for (const { segment, start, end } of pieces) {
+    if (segment == null || segment.length === 1) continue;
 
     const source = resolvedSources[segment[SOURCES_INDEX]];
     const name = segment.length === 5 ? names[segment[NAMES_INDEX]] : null;
+    const generated = GMapping(start[0] + 1, start[1]);
     const rangeLine = rangeSegments.get(segment);
     if (rangeLine === undefined) {
-      return {
+      result.push({
         type: 'point',
         generated,
         source,
         line: segment[SOURCE_LINE] + 1,
         column: segment[SOURCE_COLUMN],
         name,
-      };
+      });
+      continue;
     }
 
     const s = rangeOffset(segment, rangeLine, start[0], start[1])!;
-    const e = rangeOffset(segment, rangeLine, end[0], end[1])!;
     // A zero-width needle inside a range mapping resolves to a single point.
     if (start[0] === end[0] && start[1] === end[1]) {
-      return {
+      result.push({
         type: 'point',
         generated,
         source,
         line: s[SOURCE_LINE] + 1,
         column: s[SOURCE_COLUMN],
         name,
-      };
+      });
+      continue;
     }
-    return {
+
+    const e = rangeOffset(segment, rangeLine, end[0], end[1])!;
+    result.push({
       type: 'range',
-      generated,
+      generated: { start: generated, end: GMapping(end[0] + 1, end[1]) },
       source,
       start: { line: s[SOURCE_LINE] + 1, column: s[SOURCE_COLUMN] },
       end: { line: e[SOURCE_LINE] + 1, column: e[SOURCE_COLUMN] },
       name,
-    };
-  });
+    });
+  }
+  return result;
 }
 
-function pushBound(bounds: number[][], line: number, column: number) {
+function pushBound(bounds: Position[], line: number, column: number) {
   const last = bounds[bounds.length - 1];
   if (last[0] === line && last[1] === column) return;
   bounds.push([line, column]);
