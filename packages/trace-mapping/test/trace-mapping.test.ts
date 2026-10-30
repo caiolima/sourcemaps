@@ -18,6 +18,7 @@ import {
   allGeneratedPositionsFor,
   isIgnored,
   traceRange,
+  isRange,
   type SourceMapInput,
   type EncodedSourceMap,
   type DecodedSourceMap,
@@ -863,6 +864,23 @@ describe('TraceMap', () => {
           const normalSegment = traceSegment(tracer, 0, 20);
           assert.deepEqual(normalSegment, [20, 0, 0, 20]);
           assert.equal(traceRange(tracer, normalSegment, 0, 20), null);
+        });
+
+        it('isRange', () => {
+          const tracer = new TraceMap(map);
+          const decoded = decodedMappings(tracer);
+
+          // A range on the first line is on line 0.
+          assert.deepEqual(isRange(tracer, decoded[0][0]), { line: 0 });
+          assert.deepEqual(isRange(tracer, decoded[2][0]), { line: 2 });
+          assert.deepEqual(isRange(tracer, decoded[5][0]), { line: 5 });
+
+          // Normal segments aren't ranges.
+          assert.equal(isRange(tracer, decoded[0][1]), false);
+          assert.equal(isRange(tracer, decoded[4][0]), false);
+
+          // Found by identity: an equal copy isn't the map's segment.
+          assert.equal(isRange(tracer, [...decoded[0][0]] as SourceMapSegment), false);
         });
       };
     }

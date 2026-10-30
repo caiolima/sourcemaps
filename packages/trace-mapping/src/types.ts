@@ -56,38 +56,69 @@ export type InvalidGeneratedMapping = {
 };
 
 /**
- * A generated range. Lines are 1-based, columns 0-based, and `end` is exclusive.
+ * A 0-based line and column, like the positions in decoded segments.
  */
-export type GeneratedRange = { start: GeneratedMapping; end: GeneratedMapping };
-export type RangeNeedle = GeneratedRange;
-
-export type OriginalPosition = { line: number; column: number };
+export type SegmentPosition = { line: number; column: number };
 
 /**
- * One mapping found by `originalMappingsFor`, in generated order.
+ * A range of 0-based positions. `end` is exclusive.
+ */
+export type SegmentRange = { start: SegmentPosition; end: SegmentPosition };
+
+/**
+ * A range of a map's generated code. When `generated` is given, the range is
+ * the source side of another map's range mapping, and `generated.start` is
+ * where `start` is in that map's generated code: results are reported there.
+ * A `range` result of `originalMappingsFor` can be passed as-is.
+ */
+export type RangeNeedle = SegmentRange & { generated?: { start: SegmentPosition } };
+
+/**
+ * One mapping found by `originalMappingsFor`, in generated order. All
+ * positions are 0-based.
  *
  * - `range`: a range mapping intersected with the needle. Every generated
  *   position in `generated` projects linearly onto `[start, end)` in the source.
  * - `point`: a normal mapping, at the generated position where it starts (or
- *   at the needle's start, for a mapping that started before the needle).
+ *   at the needle's start, for a mapping that started before the needle). A
+ *   sourceless mapping is a point whose source, line, column and name are null.
  */
 export type OriginalMappingPiece =
   | {
       type: 'range';
-      generated: GeneratedRange;
+      generated: SegmentRange;
+      sourcesIndex: number;
       source: string | null;
-      start: OriginalPosition;
-      end: OriginalPosition;
+      start: SegmentPosition;
+      end: SegmentPosition;
       name: string | null;
     }
   | {
       type: 'point';
-      generated: GeneratedMapping;
+      generated: SegmentPosition;
+      sourcesIndex: number;
       source: string | null;
       line: number;
       column: number;
       name: string | null;
+    }
+  | {
+      type: 'point';
+      generated: SegmentPosition;
+      sourcesIndex: null;
+      source: null;
+      line: null;
+      column: null;
+      name: null;
     };
+
+/**
+ * Metadata about a range mapping's segment.
+ */
+export type RangeInfo = {
+  /** The 0-based generated line the segment is on. */
+  line: number;
+};
 
 export type Bias = typeof GREATEST_LOWER_BOUND | typeof LEAST_UPPER_BOUND;
 
