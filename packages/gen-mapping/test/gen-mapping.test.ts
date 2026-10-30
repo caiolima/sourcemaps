@@ -982,6 +982,45 @@ describe('GenMapping', () => {
 
         assert.deepEqual(toDecodedMap(map).mappings, [[[0, 0, 0, 0]]]);
       });
+
+      it('keeps a range segment with the same original position as the previous segment', () => {
+        const map = new GenMapping();
+
+        maybeAddMapping(map, {
+          generated: { line: 1, column: 0 },
+          source: 'input.js',
+          original: { line: 1, column: 0 },
+        });
+        maybeAddMapping(map, {
+          generated: { line: 1, column: 5 },
+          source: 'input.js',
+          original: { line: 1, column: 0 },
+          isRange: true,
+        });
+
+        assert.deepEqual(toDecodedMap(map).mappings, [
+          [
+            [0, 0, 0, 0],
+            [5, 0, 0, 0],
+          ],
+        ]);
+        assert.deepEqual(toDecodedMap(map).rangeMappings, [[1]]);
+      });
+
+      it('does not mark the previous segment as a range when skipping', () => {
+        const map = new GenMapping();
+
+        maybeAddMapping(map, {
+          generated: { line: 1, column: 0 },
+          source: 'input.js',
+          original: { line: 1, column: 0 },
+        });
+        // Skipped: a sourceless segment first on its line provides no value.
+        maybeAddMapping(map, { generated: { line: 2, column: 0 }, isRange: true });
+
+        assert.deepEqual(toDecodedMap(map).mappings, [[[0, 0, 0, 0]]]);
+        assert.deepEqual(toDecodedMap(map).rangeMappings, undefined);
+      });
     });
   });
 

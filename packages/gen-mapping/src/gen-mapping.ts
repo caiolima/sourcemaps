@@ -356,6 +356,7 @@ function addSegmentInternal<S extends string | null | undefined>(
   sourceColumn: S extends string ? number : null | undefined,
   name: S extends string ? string | null | undefined : null | undefined,
   content: S extends string ? string | null | undefined : null | undefined,
+  isRange = false,
 ): void {
   const {
     _mappings: mappings,
@@ -378,6 +379,7 @@ function addSegmentInternal<S extends string | null | undefined>(
       return;
     if (index < line.length) adjustRangeMappings(rangeMappings, genLine, index);
     insert(line, index, [genColumn]);
+    if (isRange) markRange(rangeMappings, genLine, index);
     return;
   }
 
@@ -394,9 +396,10 @@ function addSegmentInternal<S extends string | null | undefined>(
 
   // If this source segment isn't different from the previous source segment, or
   // start a source segment after a sourceless segment, then it provides no
-  // value.
+  // value. A range segment is never redundant: positions after it are offset.
   if (
     skipable &&
+    !isRange &&
     skipSource(line, index, sourcesIndex, sourceLine, sourceColumn, namesIndex) &&
     !isRangeOpen(mappings, rangeMappings, genLine, index - 1)
   ) {
@@ -413,6 +416,16 @@ function addSegmentInternal<S extends string | null | undefined>(
       ? [genColumn, sourcesIndex, sourceLine, sourceColumn, namesIndex]
       : [genColumn, sourcesIndex, sourceLine, sourceColumn],
   );
+  if (isRange) markRange(rangeMappings, genLine, index);
+}
+
+/**
+ * Marks the segment at the given index as a range mapping.
+ */
+function markRange(rangeMappings: MappingIndex[][], genLine: number, index: number) {
+  const ranges = getLine(rangeMappings, genLine);
+  const i = getRangeIndex(ranges, index);
+  if (i < 0) insert(ranges, ~i, index);
 }
 
 function assert<T>(_val: unknown): asserts _val is T {
@@ -594,6 +607,7 @@ function addMappingInternal<S extends string | null | undefined>(
       null,
       null,
       null,
+      isRange,
     );
   } else {
     assert<Pos>(original);
@@ -607,7 +621,7 @@ function addMappingInternal<S extends string | null | undefined>(
       original.column,
       name,
       content,
+      isRange,
     );
   }
-  if (isRange) setRangeSegment(map, generated.line - 1, generated.column);
 }

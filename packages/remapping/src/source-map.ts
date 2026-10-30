@@ -16,6 +16,7 @@ export default class SourceMap {
   declare sourcesContent?: (string | null)[];
   declare version: 3;
   declare ignoreList: number[] | undefined;
+  declare rangeMappings?: EncodedSourceMap['rangeMappings'] | DecodedSourceMap['rangeMappings'];
 
   constructor(map: GenMapping, options: Options) {
     const out = options.decodedMappings ? toDecodedMap(map) : toEncodedMap(map);
@@ -25,6 +26,8 @@ export default class SourceMap {
     this.names = out.names as SourceMap['names'];
     this.ignoreList = out.ignoreList as SourceMap['ignoreList'];
     this.sourceRoot = out.sourceRoot;
+    // Only present when the map has range mappings, so other maps are unchanged.
+    if (out.rangeMappings) this.rangeMappings = out.rangeMappings;
 
     this.sources = out.sources as SourceMap['sources'];
     if (!options.excludeContent) {
